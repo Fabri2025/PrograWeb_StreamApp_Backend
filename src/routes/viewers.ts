@@ -101,4 +101,45 @@ router.get(
   }
 );
 
+// GET /api/viewers/:viewerId/perfil
+// Devuelve nivel y puntos actuales (y saldo) para mostrar progreso en el perfil.
+router.get("/viewers/:viewerId/perfil", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const viewerId = Number(req.params.viewerId);
+    if (Number.isNaN(viewerId)) return res.status(400).json({ message: "viewerId invalido" });
+
+    const { rows } = await db.query(
+      `SELECT pv.id AS viewer_id,
+              u.id AS usuario_id,
+              u.nombre,
+              u.avatar_url,
+              pv.nivel_actual,
+              pv.puntos,
+              pv.horas_vistas,
+              b.saldo_coins
+       FROM perfiles_viewer pv
+       JOIN usuarios u ON u.id = pv.usuario_id
+       JOIN billeteras b ON b.usuario_id = u.id
+       WHERE pv.id = $1`,
+      [viewerId]
+    );
+
+    if (!rows.length) return res.status(404).json({ message: "viewer no encontrado" });
+    const row = rows[0];
+
+    return res.json({
+      viewerId: row.viewer_id,
+      usuarioId: row.usuario_id,
+      nombre: row.nombre,
+      avatar_url: row.avatar_url,
+      nivel_actual: row.nivel_actual,
+      puntos: Number(row.puntos),
+      horas_vistas: Number(row.horas_vistas),
+      saldo_coins: Number(row.saldo_coins),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

@@ -17,6 +17,27 @@ router.post("/streams/:streamId/mensajes", async (req: Request, res: Response, n
   try {
     await client.query("BEGIN");
 
+    const checkLevelUp = async (viewerId: number, puntosTotales: number, nivelActual: number) => {
+      const rule = await client.query(
+        `SELECT nivel
+         FROM reglas_nivel_viewer
+         WHERE activo = TRUE AND puntos_requeridos <= $1
+         ORDER BY nivel DESC
+         LIMIT 1`,
+        [puntosTotales]
+      );
+      if (!rule.rowCount) return { leveledUp: false, nuevoNivel: nivelActual };
+      const nuevoNivel = Number(rule.rows[0].nivel);
+      if (nuevoNivel > nivelActual) {
+        await client.query(
+          `UPDATE perfiles_viewer SET nivel_actual = $1 WHERE id = $2`,
+          [nuevoNivel, viewerId]
+        );
+        return { leveledUp: true, nuevoNivel };
+      }
+      return { leveledUp: false, nuevoNivel: nivelActual };
+    };
+
     const viewerRes = await client.query(
       `SELECT pv.id, pv.usuario_id, pv.nivel_actual, pv.puntos
        FROM perfiles_viewer pv
@@ -62,12 +83,16 @@ router.post("/streams/:streamId/mensajes", async (req: Request, res: Response, n
       [streamId, viewer.usuario_id, mensaje.trim(), viewer.nivel_actual]
     );
 
+    const levelResult = await checkLevelUp(viewer.id, Number(puntosRes.rows[0].puntos), viewer.nivel_actual);
+
     await client.query("COMMIT");
     return res.status(201).json({
       mensajeId: msgRes.rows[0].id,
       streamId,
       viewerId: viewer.id,
       puntos_totales: Number(puntosRes.rows[0].puntos),
+      leveled_up: levelResult.leveledUp,
+      nivel_actual: levelResult.nuevoNivel,
       creado_en: msgRes.rows[0].creado_en,
     });
   } catch (err) {

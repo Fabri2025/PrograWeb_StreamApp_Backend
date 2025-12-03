@@ -203,6 +203,27 @@ router.post(
     try {
       await client.query("BEGIN");
 
+      const checkLevelUp = async (viewerId: number, puntosTotales: number, nivelActual: number) => {
+        const rule = await client.query(
+          `SELECT nivel
+           FROM reglas_nivel_viewer
+           WHERE activo = TRUE AND puntos_requeridos <= $1
+           ORDER BY nivel DESC
+           LIMIT 1`,
+          [puntosTotales]
+        );
+        if (!rule.rowCount) return { leveledUp: false, nuevoNivel: nivelActual };
+        const nuevoNivel = Number(rule.rows[0].nivel);
+        if (nuevoNivel > nivelActual) {
+          await client.query(
+            `UPDATE perfiles_viewer SET nivel_actual = $1 WHERE id = $2`,
+            [nuevoNivel, viewerId]
+          );
+          return { leveledUp: true, nuevoNivel };
+        }
+        return { leveledUp: false, nuevoNivel: nivelActual };
+      };
+
       const viewerRes = await client.query(
         `SELECT pv.id, pv.usuario_id, pv.nivel_actual, pv.puntos,
                 b.id AS billetera_id, b.saldo_coins
@@ -301,10 +322,12 @@ router.post(
         [totalPuntos, viewer.id]
       );
 
+      const levelResult = await checkLevelUp(viewer.id, Number(puntosRes.rows[0].puntos), viewer.nivel_actual);
+
       await client.query(
         `INSERT INTO mensajes_chat (stream_id, usuario_id, tipo, mensaje, gift_id, envio_regalo_id, badge, nivel_usuario, creado_en)
          VALUES ($1, $2, 'regalo', $3, $4, $5, 'none', $6, NOW())`,
-        [stream.id, viewer.usuario_id, msgText ?? null, regalo.id, envioRes.rows[0].id, viewer.nivel_actual]
+        [stream.id, viewer.usuario_id, msgText ?? null, regalo.id, envioRes.rows[0].id, levelResult.nuevoNivel]
       );
 
       await client.query("COMMIT");
@@ -316,6 +339,8 @@ router.post(
         coins_gastados: totalCoins,
         puntos_generados: totalPuntos,
         puntos_totales: Number(puntosRes.rows[0].puntos),
+        leveled_up: levelResult.leveledUp,
+        nivel_actual: levelResult.nuevoNivel,
         saldo_restante: Number(billeteraRes.rows[0].saldo_coins),
         creado_en: envioRes.rows[0].creado_en,
       });
@@ -324,6 +349,52 @@ router.post(
       next(err);
     } finally {
       client.release();
+    }
+  }
+);
+
+// GET /api/streams/:streamId/eventos/regalos
+// Devuelve los envios de regalo recientes para overlays/animaciones.
+router.get(
+  "/streams/:streamId/eventos/regalos",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const streamId = Number(req.params.streamId);
+      const limitParam = req.query.limit;
+      const limit =
+        limitParam === undefined ? 20 : Number(limitParam);
+      if (Number.isNaN(streamId)) return res.status(400).json({ message: "streamId invalido" });
+      if (Number.isNaN(limit) || limit <= 0 || limit > 100)
+        return res.status(400).json({ message: "limit invalido (1-100)" });
+
+      const { rows } = await db.query(
+        `SELECT eg.id,
+                eg.stream_id,
+                eg.cantidad,
+                eg.coins_gastados,
+                eg.puntos_generados,
+                eg.mensaje,
+                eg.creado_en,
+                r.id AS regalo_id,
+                r.nombre AS regalo_nombre,
+                r.costo_coins,
+                r.puntos_otorgados,
+                v.id AS viewer_id,
+                u.nombre AS viewer_nombre,
+                u.avatar_url
+         FROM envios_regalo eg
+         JOIN regalos r ON r.id = eg.gift_id
+         JOIN perfiles_viewer v ON v.id = eg.remitente_id
+         JOIN usuarios u ON u.id = v.usuario_id
+         WHERE eg.stream_id = $1
+         ORDER BY eg.creado_en DESC, eg.id DESC
+         LIMIT $2`,
+        [streamId, limit]
+      );
+
+      return res.json(rows);
+    } catch (err) {
+      next(err);
     }
   }
 );
