@@ -202,4 +202,66 @@ router.post(
   }
 );
 
+// GET /api/streamers/:streamerId/progreso-nivel
+// Devuelve horas totales y lo que falta para el siguiente nivel del streamer.
+router.get(
+  "/streamers/:streamerId/progreso-nivel",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const streamerId = Number(req.params.streamerId);
+      if (Number.isNaN(streamerId)) return res.status(400).json({ message: "streamerId invalido" });
+
+      const perfilRes = await db.query(
+        `SELECT id, nivel_actual, horas_totales
+         FROM perfiles_streamer
+         WHERE id = $1`,
+        [streamerId]
+      );
+      if (!perfilRes.rowCount) return res.status(404).json({ message: "streamer no encontrado" });
+      const perfil = perfilRes.rows[0];
+
+      const nextLevelRes = await db.query(
+        `SELECT nivel, horas_requeridas
+         FROM reglas_nivel_streamer
+         WHERE activo = TRUE AND streamer_id = $1 AND nivel > $2
+         ORDER BY nivel ASC
+         LIMIT 1`,
+        [streamerId, perfil.nivel_actual]
+      );
+
+      if (!nextLevelRes.rowCount) {
+        return res.json({
+          streamerId: perfil.id,
+          nivel_actual: perfil.nivel_actual,
+          horas_totales: Number(perfil.horas_totales),
+          es_nivel_maximo: true,
+          siguiente_nivel: null,
+          horas_requeridas: null,
+          falta_horas: 0,
+          progreso_porcentaje: 100,
+        });
+      }
+
+      const nextLevel = nextLevelRes.rows[0];
+      const horasReq = Number(nextLevel.horas_requeridas);
+      const horasTotales = Number(perfil.horas_totales);
+      const falta = Math.max(horasReq - horasTotales, 0);
+      const progresoPct = Math.min(100, Number(((horasTotales / horasReq) * 100).toFixed(2)));
+
+      return res.json({
+        streamerId: perfil.id,
+        nivel_actual: perfil.nivel_actual,
+        horas_totales: horasTotales,
+        es_nivel_maximo: false,
+        siguiente_nivel: nextLevel.nivel,
+        horas_requeridas: horasReq,
+        falta_horas: falta,
+        progreso_porcentaje: progresoPct,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 export default router;
