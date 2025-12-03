@@ -6,6 +6,8 @@ import nivelesRouter from "./routes/niveles";
 import authRouter from "./routes/auth";
 import monedasRouter from "./routes/monedas";
 import streamsRouter from "./routes/streams";
+import streamerRoutes from "./routes/streamers";
+import monetizacionRoutes from "./routes/monetizacion";
 
 const app = express();
 app.use(express.json());
@@ -17,6 +19,8 @@ app.use("/api", mensajesRouter);
 app.use("/api", nivelesRouter);
 app.use("/api", monedasRouter);
 app.use("/api", streamsRouter);
+app.use("/api", streamerRoutes); // Dashboard, start/end stream (horas y nivel)
+app.use("/api/monetizacion", monetizacionRoutes); // Recarga de monedas
 
 // Manejador de errores simple
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
